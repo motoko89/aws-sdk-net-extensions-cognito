@@ -28,11 +28,14 @@
     <GenerateAssemblyCopyrightAttribute>false</GenerateAssemblyCopyrightAttribute>
     <GenerateAssemblyVersionAttribute>false</GenerateAssemblyVersionAttribute>
     <GenerateAssemblyFileVersionAttribute>false</GenerateAssemblyFileVersionAttribute>
-    <DelaySign>false</DelaySign>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <Version>1.0.0</Version>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\aws-sdk-net\sdk\src\Services\CognitoIdentity\AWSSDK.CognitoIdentity.CoreCLR.csproj" />
+    <ProjectReference Include="..\..\..\aws-sdk-net\sdk\src\Services\CognitoIdentityProvider\AWSSDK.CognitoIdentityProvider.CoreCLR.csproj" />
+  </ItemGroup>
   <Choose>
     <When Condition=" '$(AWSKeyFile)' == '' ">
       <PropertyGroup>
@@ -46,8 +49,4 @@
     </Otherwise>
   </Choose>
 
-  <ItemGroup>
-    <PackageReference Include="AWSSDK.CognitoIdentity" Version="3.3.2.14" />
-    <PackageReference Include="AWSSDK.CognitoIdentityProvider" Version="3.3.5" />
-  </ItemGroup>
 </Project>
