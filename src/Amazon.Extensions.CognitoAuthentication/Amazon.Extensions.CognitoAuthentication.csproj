@@ -32,8 +32,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\aws-sdk-net\sdk\src\Services\CognitoIdentity\AWSSDK.CognitoIdentity.CoreCLR.csproj" />
-    <ProjectReference Include="..\..\..\aws-sdk-net\sdk\src\Services\CognitoIdentityProvider\AWSSDK.CognitoIdentityProvider.CoreCLR.csproj" />
+    <ProjectReference Include="..\..\..\aws-sdk-net\sdk\src\Services\CognitoIdentity\AWSSDK.CognitoIdentity.NetStandard.csproj" />
+    <ProjectReference Include="..\..\..\aws-sdk-net\sdk\src\Services\CognitoIdentityProvider\AWSSDK.CognitoIdentityProvider.NetStandard.csproj" />
   </ItemGroup>
   <Choose>
     <When Condition=" '$(AWSKeyFile)' == '' ">
