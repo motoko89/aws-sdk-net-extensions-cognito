@@ -13,6 +13,11 @@
  * permissions and limitations under the License.
  */
 
+/* The following knowledge base was used as guide for the implementation 
+ * of some of the below Cognito challenges.
+ * https://aws.amazon.com/premiumsupport/knowledge-center/cognito-user-pool-remembered-devices/?nc1=h_ls
+ */
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -55,11 +60,33 @@ namespace Amazon.Extensions.CognitoAuthentication
 
             if (challengeResponsesValid && deviceKeyValid)
             {
-                challengeRequest.ChallengeResponses.Add(CognitoConstants.ChlgParamDeviceKey, Device.DeviceKey);
+                challengeRequest.ChallengeResponses[CognitoConstants.ChlgParamDeviceKey] = Device.DeviceKey;
             }
 
             RespondToAuthChallengeResponse verifierResponse =
                 await Provider.RespondToAuthChallengeAsync(challengeRequest).ConfigureAwait(false);
+            var isDeviceAuthRequest = verifierResponse.AuthenticationResult == null && (!string.IsNullOrEmpty(srpRequest.DeviceGroupKey)
+                || !string.IsNullOrEmpty(srpRequest.DevicePass));
+            #region Device-level authentication
+            if (isDeviceAuthRequest)
+            {
+                if (string.IsNullOrEmpty(srpRequest.DeviceGroupKey) || string.IsNullOrEmpty(srpRequest.DevicePass))
+                {
+                    throw new ArgumentNullException("Device Group Key and Device Pass required for authentication.", "srpRequest");
+                }
+
+                #region Device SRP Auth
+                var deviceAuthRequest = CreateDeviceSrpAuthRequest(verifierResponse, tupleAa);
+                var deviceAuthResponse = await Provider.RespondToAuthChallengeAsync(deviceAuthRequest).ConfigureAwait(false); 
+                #endregion
+
+                #region Device Password Verifier
+                var devicePasswordChallengeRequest = CreateDevicePasswordVerifierAuthRequest(deviceAuthResponse, srpRequest.DeviceGroupKey, srpRequest.DevicePass, tupleAa);
+                verifierResponse = await Provider.RespondToAuthChallengeAsync(devicePasswordChallengeRequest).ConfigureAwait(false);
+                #endregion
+
+            }
+            #endregion
 
             UpdateSessionIfAuthenticationComplete(verifierResponse.ChallengeName, verifierResponse.AuthenticationResult);
 
@@ -68,6 +95,94 @@ namespace Amazon.Extensions.CognitoAuthentication
                 verifierResponse.ChallengeName,
                 verifierResponse.ChallengeParameters,
                 new Dictionary<string, string>(verifierResponse.ResponseMetadata.Metadata));
+        }
+
+        /// <summary>
+        /// Internal method which responds to the DEVICE_SRP_AUTH challenge in SRP authentication
+        /// </summary>
+        /// <param name="challenge">The response from the PASSWORD_VERIFIER challenge</param>
+        /// <param name="tupleAa">Tuple of BigIntegers containing the A,a pair for the SRP protocol flow</param>
+        /// <returns></returns>
+        private RespondToAuthChallengeRequest CreateDeviceSrpAuthRequest(RespondToAuthChallengeResponse challenge, Tuple<BigInteger, BigInteger> tupleAa)
+        {
+            
+            RespondToAuthChallengeRequest authChallengeRequest = new RespondToAuthChallengeRequest()
+            {
+                ChallengeName = "DEVICE_SRP_AUTH",
+                ClientId = ClientID,
+                Session = challenge.Session,
+                ChallengeResponses = new Dictionary<string, string>
+                {
+                    {CognitoConstants.ChlgParamUsername, Username},
+                    {CognitoConstants.ChlgParamDeviceKey, Device.DeviceKey},
+                    {CognitoConstants.ChlgParamSrpA, tupleAa.Item1.ToString("X") },
+                }
+
+            };
+            if (!string.IsNullOrEmpty(ClientSecret))
+            {
+                SecretHash = CognitoAuthHelper.GetUserPoolSecretHash(Username, ClientID, ClientSecret);
+                authChallengeRequest.ChallengeResponses.Add(CognitoConstants.ChlgParamSecretHash, SecretHash);
+            }
+            return authChallengeRequest;
+        }
+
+
+        /// <summary>
+        /// Internal method which responds to the DEVICE_PASSWORD_VERIFIER challenge in SRP authentication
+        /// </summary>
+        /// <param name="challenge">Response from the InitiateAuth challenge</param>
+        /// <param name="deviceKeyGroup">Group Key for the CognitoDevice, needed for authentication</param>
+        /// <param name="devicePassword">Password for the CognitoDevice, needed for authentication</param>
+        /// <param name="tupleAa">Tuple of BigIntegers containing the A,a pair for the SRP protocol flow</param>
+        /// <returns>Returns the RespondToAuthChallengeRequest for an SRP authentication flow</returns>
+        private RespondToAuthChallengeRequest CreateDevicePasswordVerifierAuthRequest(RespondToAuthChallengeResponse challenge,
+                                                                                   string deviceKeyGroup,
+                                                                                   string devicePassword,
+                                                                                   Tuple<BigInteger, BigInteger> tupleAa)
+        {
+            string deviceKey = challenge.ChallengeParameters[CognitoConstants.ChlgParamDeviceKey];
+            string username = challenge.ChallengeParameters[CognitoConstants.ChlgParamUsername];
+            string secretBlock = challenge.ChallengeParameters[CognitoConstants.ChlgParamSecretBlock];
+            string salt = challenge.ChallengeParameters[CognitoConstants.ChlgParamSalt];
+            BigInteger srpb = BigIntegerExtensions.FromUnsignedLittleEndianHex(challenge.ChallengeParameters[CognitoConstants.ChlgParamSrpB]);
+
+            if ((srpb.TrueMod(AuthenticationHelper.N)).Equals(BigInteger.Zero))
+            {
+                throw new ArgumentException("SRP error, B mod N cannot be zero.", "challenge");
+            }
+
+            string timeStr = DateTime.UtcNow.ToString("ddd MMM d HH:mm:ss \"UTC\" yyyy", CultureInfo.InvariantCulture);
+
+            var claimBytes = AuthenticationHelper.AuthenticateDevice(username, deviceKey, devicePassword, deviceKeyGroup, salt,
+                challenge.ChallengeParameters[CognitoConstants.ChlgParamSrpB], secretBlock, timeStr, tupleAa);
+
+
+            string claimB64 = Convert.ToBase64String(claimBytes);
+            Dictionary<string, string> srpAuthResponses = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                {CognitoConstants.ChlgParamPassSecretBlock, secretBlock},
+                {CognitoConstants.ChlgParamPassSignature, claimB64},
+                {CognitoConstants.ChlgParamUsername, username },
+                {CognitoConstants.ChlgParamTimestamp, timeStr },
+                {CognitoConstants.ChlgParamDeviceKey, Device.DeviceKey }
+            };
+
+            if (!string.IsNullOrEmpty(ClientSecret))
+            {
+                SecretHash = CognitoAuthHelper.GetUserPoolSecretHash(Username, ClientID, ClientSecret);
+                srpAuthResponses.Add(CognitoConstants.ChlgParamSecretHash, SecretHash);
+            }
+
+            RespondToAuthChallengeRequest authChallengeRequest = new RespondToAuthChallengeRequest()
+            {
+                ChallengeName = challenge.ChallengeName,
+                ClientId = ClientID,
+                Session = challenge.Session,
+                ChallengeResponses = srpAuthResponses
+            };
+
+            return authChallengeRequest;
         }
 
         /// <summary>
@@ -127,6 +242,63 @@ namespace Amazon.Extensions.CognitoAuthentication
                 authResponse.ChallengeName,
                 authResponse.ChallengeParameters,
                 new Dictionary<string, string>(authResponse.ResponseMetadata.Metadata));
+        }
+
+        /// <summary>
+        /// Generates a DeviceSecretVerifierConfigType object for a device associated with a CognitoUser for SRP Authentication
+        /// </summary>
+        /// <param name="deviceGroupKey">The DeviceKey Group for the associated CognitoDevice</param>
+        /// <param name="deviceKey">The DeviceKey for the associated CognitoDevice</param>
+        /// <param name="devicePass">The random password for the associated CognitoDevice</param>
+        /// <returns></returns>
+        public DeviceSecretVerifierConfigType GenerateDeviceVerifier(string deviceGroupKey, string devicePass, string username)
+        {
+            return AuthenticationHelper.GenerateDeviceVerifier(deviceGroupKey, devicePass, username);
+        }
+
+        /// <summary>
+        /// Sends a confirmation request to Cognito for a new CognitoDevice
+        /// </summary>
+        /// <param name="accessToken">The user pool access token for from the InitiateAuth or other challenge response</param>
+        /// <param name="deviceKey">The device key for the associated CognitoDevice</param>
+        /// <param name="deviceName">The friendly name to be associated with the corresponding CognitoDevice</param>
+        /// <param name="passwordVerifier">The password verifier generated from GenerateDeviceVerifier for the corresponding CognitoDevice</param>
+        /// <param name="salt">The salt generated from GenerateDeviceVerifier for the corresponding CognitoDevice</param>
+        /// <returns></returns>
+        public async Task<ConfirmDeviceResponse> ConfirmDeviceAsync(string accessToken, string deviceKey, string deviceName, string passwordVerifier, string salt)
+        {
+            var request = new ConfirmDeviceRequest
+            {
+                AccessToken = accessToken,
+                DeviceKey = deviceKey,
+                DeviceName = deviceName,
+                DeviceSecretVerifierConfig = new DeviceSecretVerifierConfigType
+                {
+                    PasswordVerifier = passwordVerifier,
+                    Salt = salt
+                }
+            };
+
+            return await Provider.ConfirmDeviceAsync(request);
+        }
+
+        /// <summary>
+        /// Updates the remembered status for a given CognitoDevice
+        /// </summary>
+        /// <param name="accessToken">The user pool access token for from the InitiateAuth or other challenge response</param>
+        /// <param name="deviceKey">The device key for the associated CognitoDevice</param>
+        /// <param name="deviceRememberedStatus">The device remembered status for the associated CognitoDevice</param>
+        /// <returns></returns>
+        public async Task<UpdateDeviceStatusResponse> UpdateDeviceStatusAsync(string accessToken, string deviceKey, string deviceRememberedStatus)
+        {
+            var request = new UpdateDeviceStatusRequest
+            {
+                AccessToken = accessToken,
+                DeviceKey = deviceKey,
+                DeviceRememberedStatus = deviceRememberedStatus
+            };
+
+            return await Provider.UpdateDeviceStatusAsync(request);
         }
 
         /// <summary>
@@ -246,6 +418,10 @@ namespace Amazon.Extensions.CognitoAuthentication
 
             InitiateAuthResponse initiateResponse =
                 await Provider.InitiateAuthAsync(initiateAuthRequest).ConfigureAwait(false);
+
+            // Service does not return the refresh token. Hence, set it to the old refresh token that was used.
+            if (string.IsNullOrEmpty(initiateResponse.ChallengeName) && string.IsNullOrEmpty(initiateResponse.AuthenticationResult.RefreshToken))
+                initiateResponse.AuthenticationResult.RefreshToken = initiateAuthRequest.AuthParameters[CognitoConstants.ChlgParamRefreshToken];
 
             UpdateSessionIfAuthenticationComplete(initiateResponse.ChallengeName, initiateResponse.AuthenticationResult);
 
