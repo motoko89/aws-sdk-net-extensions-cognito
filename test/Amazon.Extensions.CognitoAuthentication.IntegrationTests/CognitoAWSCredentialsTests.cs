@@ -15,6 +15,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using Xunit;
 
 using Amazon;
@@ -65,7 +66,7 @@ namespace CognitoAuthentication.IntegrationTests.NET45
                     {
                         new CognitoIdentityProviderInfo() { ProviderName = providerName, ClientId = user.ClientID}
                     },
-                    IdentityPoolName = "TestIdentityPool" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
+                    IdentityPoolName = "TestIdentityPool" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmss"),
 
                 }).ConfigureAwait(false);
             identityPoolId = poolResponse.IdentityPoolId;
@@ -74,7 +75,7 @@ namespace CognitoAuthentication.IntegrationTests.NET45
             managementClient = new AmazonIdentityManagementServiceClient(clientCredentials, clientRegion);
             CreateRoleResponse roleResponse = managementClient.CreateRoleAsync(new CreateRoleRequest()
             {
-                RoleName = "_TestRole_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
+                RoleName = "_TestRole_" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmss"),
                 AssumeRolePolicyDocument = "{\"Version\": \"2012-10-17\",\"Statement\": [{\"Effect" +
                 "\": \"Allow\",\"Principal\": {\"Federated\": \"cognito-identity.amazonaws.com\"}," +
                 "\"Action\": \"sts:AssumeRoleWithWebIdentity\"}]}"
@@ -87,7 +88,7 @@ namespace CognitoAuthentication.IntegrationTests.NET45
                 PolicyDocument = "{\"Version\": \"2012-10-17\",\"Statement\": " +
                 "[{\"Effect\": \"Allow\",\"Action\": [\"mobileanalytics:PutEvents\",\"cog" +
                 "nito-sync:*\",\"cognito-identity:*\",\"s3:*\"],\"Resource\": [\"*\"]}]}",
-                PolicyName = "_Cognito_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
+                PolicyName = "_Cognito_" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmss"),
             }).Result;
             policyArn = policyResponse.Policy.Arn;
 
@@ -114,35 +115,22 @@ namespace CognitoAuthentication.IntegrationTests.NET45
 
             using (var client = new AmazonS3Client(credentials, Amazon.RegionEndpoint.USEast1))
             {
-                int tries = 0;
-                string bufferExMsg = "Invalid identity pool configuration. Check assigned IAM roles for this pool.";
                 ListBucketsResponse bucketsResponse = null;
 
-                for (; tries < 5; tries++)
+                for (var tries = 0; tries < 5; tries++)
                 {
                     try
                     {
                         bucketsResponse = await client.ListBucketsAsync(new ListBucketsRequest()).ConfigureAwait(false);
                         break;
                     }
-                    catch (NullReferenceException)
+                    catch (Exception ex)
                     {
                         System.Threading.Thread.Sleep(3000);
                     }
-                    catch (Exception ex)
-                    {
-                        if (string.Equals(bufferExMsg, ex.Message))
-                        {
-                            System.Threading.Thread.Sleep(3000);
-                        }
-                        else
-                        {
-                            throw ex;
-                        }
-                    }
                 }
 
-                Assert.True(tries < 5, "Failed to list buckets after 5 tries");
+                Assert.True(null != bucketsResponse, "Failed to list buckets after 5 tries");
                 Assert.Equal(bucketsResponse.HttpStatusCode, System.Net.HttpStatusCode.OK);
             }
         }

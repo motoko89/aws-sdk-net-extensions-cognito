@@ -39,7 +39,7 @@ namespace Amazon.Extensions.CognitoAuthentication
         /// create an InitiateAuthAsync API call for SRP authentication</param>
         /// <returns>Returns the AuthFlowResponse object that can be used to respond to the next challenge, 
         /// if one exists</returns>
-        public async Task<AuthFlowResponse> StartWithSrpAuthAsync(InitiateSrpAuthRequest srpRequest)
+        public virtual async Task<AuthFlowResponse> StartWithSrpAuthAsync(InitiateSrpAuthRequest srpRequest)
         {
             if (srpRequest == null || string.IsNullOrEmpty(srpRequest.Password))
             {
@@ -192,7 +192,7 @@ namespace Amazon.Extensions.CognitoAuthentication
         /// create an InitiateAuthAsync API call for custom authentication</param>
         /// <returns>Returns the AuthFlowResponse object that can be used to respond to the next challenge, 
         /// if one exists</returns>
-        public async Task<AuthFlowResponse> StartWithCustomAuthAsync(InitiateCustomAuthRequest customRequest)
+        public virtual async Task<AuthFlowResponse> StartWithCustomAuthAsync(InitiateCustomAuthRequest customRequest)
         {
             InitiateAuthRequest authRequest = new InitiateAuthRequest()
             {
@@ -222,7 +222,7 @@ namespace Amazon.Extensions.CognitoAuthentication
         /// respond to the current custom authentication challenge</param>
         /// <returns>Returns the AuthFlowResponse object that can be used to respond to the next challenge, 
         /// if one exists</returns>
-        public async Task<AuthFlowResponse> RespondToCustomAuthAsync(RespondToCustomChallengeRequest customRequest)
+        public virtual async Task<AuthFlowResponse> RespondToCustomAuthAsync(RespondToCustomChallengeRequest customRequest)
         {
             RespondToAuthChallengeRequest request = new RespondToAuthChallengeRequest()
             {
@@ -309,18 +309,31 @@ namespace Amazon.Extensions.CognitoAuthentication
         /// respond to the current SMS MFA authentication challenge</param>
         /// <returns>Returns the AuthFlowResponse object that can be used to respond to the next challenge, 
         /// if one exists</returns>
-        public async Task<AuthFlowResponse> RespondToSmsMfaAuthAsync(RespondToSmsMfaRequest smsMfaRequest)
+        public virtual async Task<AuthFlowResponse> RespondToSmsMfaAuthAsync(RespondToSmsMfaRequest smsMfaRequest)
+        {
+            return await RespondToMfaAuthAsync(smsMfaRequest).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Uses the properties of the RespondToSmsMfaRequest object to respond to the current MFA 
+        /// authentication challenge using an asynchronous call
+        /// </summary>
+        /// <param name="mfaRequest">RespondToMfaRequest object containing the necessary parameters to
+        /// respond to the current MFA authentication challenge</param>
+        /// <returns>Returns the AuthFlowResponse object that can be used to respond to the next challenge, 
+        /// if one exists</returns>
+        public async Task<AuthFlowResponse> RespondToMfaAuthAsync(RespondToMfaRequest mfaRequest)
         {
             RespondToAuthChallengeRequest challengeRequest = new RespondToAuthChallengeRequest
             {
                 ChallengeResponses = new Dictionary<string, string>
                     {
-                        { CognitoConstants.ChlgParamSmsMfaCode, smsMfaRequest.MfaCode},
+                        { GetChallengeParamCodeName(mfaRequest.ChallengeNameType), mfaRequest.MfaCode},
                         { CognitoConstants.ChlgParamUsername, Username }
                     },
-                Session = smsMfaRequest.SessionID,
+                Session = mfaRequest.SessionID,
                 ClientId = ClientID,
-                ChallengeName = ChallengeNameType.SMS_MFA
+                ChallengeName = mfaRequest.ChallengeNameType
             };
 
             if (!string.IsNullOrEmpty(SecretHash))
@@ -341,6 +354,19 @@ namespace Amazon.Extensions.CognitoAuthentication
         }
 
         /// <summary>
+        /// Internal method which works out which Challenge Parameter to use based on the ChallengeTypeName
+        /// </summary>
+        /// <param name="challengeNameType">ChallengeTypeName from the challenge</param>
+        /// <returns>Returns the CognitoConstants for the given ChallengeTypeName</returns>
+        private string GetChallengeParamCodeName(ChallengeNameType challengeNameType )
+        {
+            if (challengeNameType == ChallengeNameType.SMS_MFA) return CognitoConstants.ChlgParamSmsMfaCode;
+            if (challengeNameType == ChallengeNameType.SOFTWARE_TOKEN_MFA) return CognitoConstants.ChlgParamSoftwareTokenMfaCode;
+
+            return null;
+        }
+
+        /// <summary>
         /// Uses the properties of the RespondToNewPasswordRequiredRequest object to respond to the current new 
         /// password required authentication challenge using an asynchronous call
         /// </summary>
@@ -348,7 +374,7 @@ namespace Amazon.Extensions.CognitoAuthentication
         /// parameters to respond to the current SMS MFA authentication challenge</param>
         /// <returns>Returns the AuthFlowResponse object that can be used to respond to the next challenge, 
         /// if one exists</returns>
-        public Task<AuthFlowResponse> RespondToNewPasswordRequiredAsync(RespondToNewPasswordRequiredRequest newPasswordRequest)
+        public virtual Task<AuthFlowResponse> RespondToNewPasswordRequiredAsync(RespondToNewPasswordRequiredRequest newPasswordRequest)
         {
             return RespondToNewPasswordRequiredAsync(newPasswordRequest, null);
         }
@@ -363,7 +389,7 @@ namespace Amazon.Extensions.CognitoAuthentication
         /// parameters to respond to the current SMS MFA authentication challenge</param>
         /// <returns>Returns the AuthFlowResponse object that can be used to respond to the next challenge, 
         /// if one exists</returns>
-        public async Task<AuthFlowResponse> RespondToNewPasswordRequiredAsync(RespondToNewPasswordRequiredRequest newPasswordRequest, Dictionary<string, string> requiredAttributes)
+        public virtual async Task<AuthFlowResponse> RespondToNewPasswordRequiredAsync(RespondToNewPasswordRequiredRequest newPasswordRequest, Dictionary<string, string> requiredAttributes)
         {
             var challengeResponses = new Dictionary<string, string>()
             {
@@ -412,7 +438,7 @@ namespace Amazon.Extensions.CognitoAuthentication
         /// parameters to initiate the refresh token authentication flow</param>
         /// <returns>Returns the AuthFlowResponse object that can be used to respond to the next challenge, 
         /// if one exists</returns>
-        public async Task<AuthFlowResponse> StartWithRefreshTokenAuthAsync(InitiateRefreshTokenAuthRequest refreshTokenRequest)
+        public virtual async Task<AuthFlowResponse> StartWithRefreshTokenAuthAsync(InitiateRefreshTokenAuthRequest refreshTokenRequest)
         {
             InitiateAuthRequest initiateAuthRequest = CreateRefreshTokenAuthRequest(refreshTokenRequest.AuthFlowType);
 
@@ -439,7 +465,7 @@ namespace Amazon.Extensions.CognitoAuthentication
         /// parameters to initiate the ADMIN_NO_SRP_AUTH authentication flow</param>
         /// <returns>Returns the AuthFlowResponse object that can be used to respond to the next challenge, 
         /// if one exists</returns>
-        public async Task<AuthFlowResponse> StartWithAdminNoSrpAuthAsync(InitiateAdminNoSrpAuthRequest adminAuthRequest)
+        public virtual async Task<AuthFlowResponse> StartWithAdminNoSrpAuthAsync(InitiateAdminNoSrpAuthRequest adminAuthRequest)
         {
             AdminInitiateAuthRequest initiateAuthRequest = CreateAdminAuthRequest(adminAuthRequest);
 
